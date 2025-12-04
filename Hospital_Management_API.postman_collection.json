@@ -1,0 +1,362 @@
+{
+  "info": {
+    "name": "Hospital Management API",
+    "description": "Complete API collection for Multi-Hospital Management System",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5000/api"
+    },
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "hospital_id",
+      "value": "1"
+    }
+  ],
+  "item": [
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@hospital.com\",\n  \"password\": \"admin123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            }
+          }
+        },
+        {
+          "name": "Get Profile",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/profile",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "profile"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Hospitals",
+      "item": [
+        {
+          "name": "Get All Hospitals",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/hospitals",
+              "host": ["{{baseUrl}}"],
+              "path": ["hospitals"]
+            }
+          }
+        },
+        {
+          "name": "Create Hospital",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"New Hospital\",\n  \"address\": \"123 Street\",\n  \"city\": \"Mumbai\",\n  \"state\": \"Maharashtra\",\n  \"pincode\": \"400001\",\n  \"phone\": \"022-12345678\",\n  \"email\": \"info@newhospital.com\",\n  \"registration_no\": \"REG004\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/hospitals",
+              "host": ["{{baseUrl}}"],
+              "path": ["hospitals"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Patients",
+      "item": [
+        {
+          "name": "Get All Patients",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/patients?hospital_id={{hospital_id}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["patients"],
+              "query": [
+                {
+                  "key": "hospital_id",
+                  "value": "{{hospital_id}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Register Patient",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"hospital_id\": {{hospital_id}},\n  \"name\": \"John Doe\",\n  \"age\": 35,\n  \"gender\": \"male\",\n  \"phone\": \"9876543210\",\n  \"email\": \"john@email.com\",\n  \"address\": \"123 Main St\",\n  \"blood_group\": \"O+\",\n  \"emergency_contact\": \"9876543211\",\n  \"emergency_contact_name\": \"Jane Doe\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/patients",
+              "host": ["{{baseUrl}}"],
+              "path": ["patients"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Doctors",
+      "item": [
+        {
+          "name": "Get All Doctors",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/doctors?hospital_id={{hospital_id}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["doctors"],
+              "query": [
+                {
+                  "key": "hospital_id",
+                  "value": "{{hospital_id}}"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Appointments",
+      "item": [
+        {
+          "name": "Get Appointments",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/appointments?hospital_id={{hospital_id}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["appointments"],
+              "query": [
+                {
+                  "key": "hospital_id",
+                  "value": "{{hospital_id}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Book Appointment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"hospital_id\": {{hospital_id}},\n  \"patient_id\": 1,\n  \"doctor_id\": 1,\n  \"appointment_date\": \"2024-01-15\",\n  \"appointment_time\": \"10:00:00\",\n  \"reason\": \"Regular checkup\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/appointments",
+              "host": ["{{baseUrl}}"],
+              "path": ["appointments"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Dashboard",
+      "item": [
+        {
+          "name": "Get Dashboard Stats",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/dashboard/stats?hospital_id={{hospital_id}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["dashboard", "stats"],
+              "query": [
+                {
+                  "key": "hospital_id",
+                  "value": "{{hospital_id}}"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Billing",
+      "item": [
+        {
+          "name": "Get All Bills",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/billing?hospital_id={{hospital_id}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["billing"],
+              "query": [
+                {
+                  "key": "hospital_id",
+                  "value": "{{hospital_id}}"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Pharmacy",
+      "item": [
+        {
+          "name": "Get Medicines",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/pharmacy/medicines?hospital_id={{hospital_id}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["pharmacy", "medicines"],
+              "query": [
+                {
+                  "key": "hospital_id",
+                  "value": "{{hospital_id}}"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Laboratory",
+      "item": [
+        {
+          "name": "Get Lab Tests",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/laboratory/tests?hospital_id={{hospital_id}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["laboratory", "tests"],
+              "query": [
+                {
+                  "key": "hospital_id",
+                  "value": "{{hospital_id}}"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
