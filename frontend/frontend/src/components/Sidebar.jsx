@@ -94,16 +94,21 @@ export default function Sidebar() {
   const { logout } = useAuth()
 
   const checkItemVisibility = (item) => {
+    // Super admin sees everything
+    if (userRole === 'super_admin') {
+      return true
+    }
+    
     // If roleRequired is specified, check if user has that role
     if (item.roleRequired) {
       return userRole === item.roleRequired
     }
+    
     // If permission is specified, check if user has that permission
     if (item.permission) {
-      // For development, show all items. In production, uncomment the line below:
-      // return hasPermission(item.permission)
-      return true // Show all items for now
+      return hasPermission(item.permission)
     }
+    
     // Show item by default if no restrictions
     return true
   }
@@ -112,8 +117,18 @@ export default function Sidebar() {
     <aside className="w-64 bg-white border-r border-gray-200 overflow-y-auto flex flex-col">
       {/* Header */}
       <div className="p-6 border-b border-gray-200">
-        <h1 className="text-2xl font-bold text-primary-600">Hospital MS</h1>
-        <p className="text-xs text-gray-500 mt-1">Multi-Clinic Management</p>
+        <div className="flex items-center space-x-3 mb-2">
+          <img 
+            src="/logo.png" 
+            alt="Hospital Logo" 
+            className="w-10 h-10 object-contain"
+            onError={(e) => {
+              e.target.style.display = 'none'
+            }}
+          />
+          <h1 className="text-2xl font-bold text-primary-600">HealthHub</h1>
+        </div>
+        <p className="text-xs text-gray-500">Multi-Clinic Management</p>
       </div>
 
       {/* Navigation */}

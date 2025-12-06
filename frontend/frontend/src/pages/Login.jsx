@@ -30,7 +30,8 @@ export default function Login() {
     try {
       await login(values.email, values.password)
       toast.success('Login successful!')
-      navigate('/')
+      // Force a full page reload to ensure all components re-render with new auth state
+      window.location.href = '/'
     } catch (error) {
       toast.error('Invalid credentials')
     }
@@ -115,7 +116,7 @@ export default function Login() {
             onFinish={handleSubmit}
             layout="vertical"
             size="medium"
-            initialValues={{ email: 'info@gmail.com', password: 'admin123' }}
+            // initialValues={{ email: 'info@gmail.com', password: 'admin123' }}
             style={{margin: "-19px 0 0 0px"}}
           >
             <Form.Item
