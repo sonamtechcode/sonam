@@ -87,14 +87,24 @@ function MenuItem({ item, isChild = false, isCollapsed = false }) {
   const { hasPermission, userRole } = usePermissions()
   const [isOpen, setIsOpen] = useState(false)
 
-  // Check if item should be visible
+  // Check if item should be visible based on permissions
   const isVisible = () => {
+    // Super admin sees everything
+    if (userRole === 'super_admin') {
+      return true
+    }
+    
+    // Check role requirement
     if (item.roleRequired) {
       return userRole === item.roleRequired
     }
+    
+    // Check permission
     if (item.permission) {
       return hasPermission(item.permission)
     }
+    
+    // Show by default if no restrictions
     return true
   }
 
@@ -179,11 +189,44 @@ export default function SidebarNew() {
 
   return (
     <aside className={`${isCollapsed ? 'w-20' : 'w-64'} bg-white border-r border-gray-200 overflow-y-auto flex flex-col transition-all duration-300`}>
-      <div className="p-6 flex items-center justify-between">
+      <div className="p-6 flex items-center justify-between border-b border-gray-200">
         {!isCollapsed && (
-          <div>
-            <h1 className="text-2xl font-bold" style={{ color: '#00D9FF' }}>Solvixo</h1>
-            <p className="text-xs text-gray-500 mt-1">Hospital Management</p>
+          <div className="flex items-center space-x-3">
+            <img 
+              src="/logo.png" 
+              alt="Hospital Logo" 
+              className="w-10 h-10 object-contain"
+              onError={(e) => {
+                // Fallback if logo.png doesn't exist
+                e.target.style.display = 'none'
+                e.target.nextSibling.style.display = 'block'
+              }}
+            />
+            <div style={{ display: 'none' }}>
+              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center">
+                <span className="text-white font-bold text-lg">S</span>
+              </div>
+            </div>
+            <div>
+              <h1 className="text-xl font-bold text-gray-800">HealthHub</h1>
+              {/* <p className="text-xs text-gray-500">Hospital Management</p> */}
+            </div>
+          </div>
+        )}
+        {isCollapsed && (
+          <img 
+            src="/logo.png" 
+            alt="Logo" 
+            className="w-8 h-8 object-contain mx-auto"
+            onError={(e) => {
+              e.target.style.display = 'none'
+              e.target.nextSibling.style.display = 'flex'
+            }}
+          />
+        )}
+        {isCollapsed && (
+          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 items-center justify-center mx-auto" style={{ display: 'none' }}>
+            <span className="text-white font-bold text-sm">S</span>
           </div>
         )}
         <button
