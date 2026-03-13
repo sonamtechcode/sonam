@@ -1,4 +1,4 @@
-const mysql = require('mysql2/promise');
+const { Pool } = require('pg');
 
 let pool = null;
 let connectionAttempts = 0;
@@ -6,18 +6,15 @@ const MAX_RETRIES = 3;
 
 const createPool = () => {
   try {
-    return mysql.createPool({
+    return new Pool({
       host: process.env.DB_HOST || 'localhost',
-      port: process.env.DB_PORT || 3306,
-      user: process.env.DB_USER || 'root',
+      port: process.env.DB_PORT || 5432,
+      user: process.env.DB_USER || 'postgres',
       password: process.env.DB_PASSWORD || '',
       database: process.env.DB_NAME || 'hospital_management',
-      waitForConnections: true,
-      connectionLimit: 5,
-      queueLimit: 0,
-      enableKeepAlive: true,
-      keepAliveInitialDelayMs: 0,
-      connectionTimeout: 10000
+      max: 5,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000
     });
   } catch (err) {
     console.error('❌ Failed to create database pool:', err.message);
@@ -39,9 +36,9 @@ const testConnection = async () => {
   }
 
   try {
-    const connection = await pool.getConnection();
+    const client = await pool.connect();
     console.log('✅ Database connected successfully');
-    connection.release();
+    client.release();
     return true;
   } catch (err) {
     connectionAttempts++;
@@ -54,6 +51,7 @@ const testConnection = async () => {
       console.warn('⚠️  Max connection attempts reached. Server will continue without database.');
       console.warn('💡 Make sure these environment variables are set:');
       console.warn('   - DB_HOST');
+      console.warn('   - DB_PORT');
       console.warn('   - DB_USER');
       console.warn('   - DB_PASSWORD');
       console.warn('   - DB_NAME');
@@ -70,7 +68,7 @@ module.exports = pool || {
   query: async () => {
     throw new Error('Database pool not initialized. Check environment variables.');
   },
-  getConnection: async () => {
+  connect: async () => {
     throw new Error('Database pool not initialized. Check environment variables.');
   }
 };

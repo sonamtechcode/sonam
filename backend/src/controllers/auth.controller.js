@@ -6,24 +6,25 @@ exports.register = async (req, res) => {
   try {
     const { email, password, name, role, hospital_id } = req.body;
 
-    const [existing] = await db.query('SELECT id FROM users WHERE email = ?', [email]);
-    if (existing.length > 0) {
+    const result = await db.query('SELECT id FROM users WHERE email = $1', [email]);
+    if (result.rows.length > 0) {
       return res.status(400).json({ success: false, message: 'Email already exists' });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    const [result] = await db.query(
-      'INSERT INTO users (email, password, name, role, hospital_id) VALUES (?, ?, ?, ?, ?)',
-      [email, hashedPassword, name, role || 'staff', hospital_id]
+    const insertResult = await db.query(
+      'INSERT INTO users (hospital_id, email, password_hash, first_name, role, is_active) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
+      [hospital_id, email, hashedPassword, name, role || 'staff', true]
     );
 
     res.status(201).json({
       success: true,
       message: 'User registered successfully',
-      userId: result.insertId
+      userId: insertResult.rows[0].id
     });
   } catch (error) {
+    console.error('Register error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -32,17 +33,19 @@ exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    const [users] = await db.query(
-      'SELECT u.*, h.name as hospital_name FROM users u LEFT JOIN hospitals h ON u.hospital_id = h.id WHERE u.email = ? AND u.is_active = 1',
+    const result = await db.query(
+      'SELECT u.*, h.name as hospital_name FROM users u LEFT JOIN hospitals h ON u.hospital_id = h.id WHERE u.email = $1 AND u.is_active = true',
       [email]
     );
+
+    const users = result.rows;
 
     if (users.length === 0) {
       return res.status(401).json({ success: false, message: 'Invalid credentials' });
     }
 
     const user = users[0];
-    const isValidPassword = await bcrypt.compare(password, user.password);
+    const isValidPassword = await bcrypt.compare(password, user.password_hash);
 
     if (!isValidPassword) {
       return res.status(401).json({ success: false, message: 'Invalid credentials' });
@@ -54,7 +57,7 @@ exports.login = async (req, res) => {
       { expiresIn: process.env.JWT_EXPIRE }
     );
 
-    delete user.password;
+    delete user.password_hash;
 
     res.json({
       success: true,
@@ -62,19 +65,21 @@ exports.login = async (req, res) => {
       user
     });
   } catch (error) {
+    console.error('Login error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
 exports.getProfile = async (req, res) => {
   try {
-    const [users] = await db.query(
-      'SELECT u.id, u.email, u.name, u.role, u.hospital_id, h.name as hospital_name FROM users u LEFT JOIN hospitals h ON u.hospital_id = h.id WHERE u.id = ?',
+    const result = await db.query(
+      'SELECT u.id, u.email, u.first_name, u.role, u.hospital_id, h.name as hospital_name FROM users u LEFT JOIN hospitals h ON u.hospital_id = h.id WHERE u.id = $1',
       [req.user.id]
     );
 
-    res.json({ success: true, user: users[0] });
+    res.json({ success: true, user: result.rows[0] });
   } catch (error) {
+    console.error('Get profile error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
