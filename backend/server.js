@@ -62,15 +62,20 @@ app.use((err, req, res, next) => {
 
 // Start WhatsApp service on server start (optional)
 const startWhatsAppService = async () => {
+  if (process.env.ENABLE_WHATSAPP !== 'true') {
+    console.log('⚠️  WhatsApp service disabled. Set ENABLE_WHATSAPP=true to enable.\n');
+    return;
+  }
+  
   try {
     const { connectWhatsApp } = require('./src/utils/whatsappBaileys');
     console.log('\n🔌 Connecting WhatsApp service...');
     await connectWhatsApp();
     console.log('✅ WhatsApp service ready!\n');
   } catch (error) {
-    console.log('⚠️  WhatsApp service not connected. Messages will be in demo mode.');
+    console.log('⚠️  WhatsApp service failed to connect.');
     console.log('💡 Error:', error.message);
-    console.log('💡 To enable WhatsApp: Keep whatsapp-start.js running\n');
+    console.log('💡 Server will continue without WhatsApp functionality.\n');
   }
 };
 
@@ -80,9 +85,7 @@ app.listen(PORT, async () => {
   console.log('Database connected successfully');
   
   // Start WhatsApp service (non-blocking)
-  if (process.env.ENABLE_WHATSAPP === 'true') {
-    startWhatsAppService();
-  } else {
-    console.log('⚠️  WhatsApp service disabled. Set ENABLE_WHATSAPP=true to enable.\n');
-  }
+  startWhatsAppService().catch(err => {
+    console.log('WhatsApp service error (non-critical):', err.message);
+  });
 });
