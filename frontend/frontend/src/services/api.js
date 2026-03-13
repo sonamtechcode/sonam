@@ -2,7 +2,7 @@ import axios from 'axios'
 import toast from 'react-hot-toast'
 
 const api = axios.create({
-     baseURL: import.meta.env.VITE_API_URL || 'https://healthhubapi.solvixo.org/api',
+  baseURL: import.meta.env.VITE_API_URL || 'https://sonam-zhe4.onrender.com/api',
   headers: {
     'Content-Type': 'application/json'
   }
