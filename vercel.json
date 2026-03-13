@@ -1,0 +1,17 @@
+{
+  "buildCommand": "cd frontend/frontend && npm install && npm run build",
+  "outputDirectory": "frontend/frontend/dist",
+  "devCommand": "cd frontend/frontend && npm run dev",
+  "installCommand": "cd frontend/frontend && npm install",
+  "framework": null,
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "https://your-backend-url.herokuapp.com/api/$1"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}
