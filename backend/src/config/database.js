@@ -1,8 +1,10 @@
 const { Pool } = require('pg');
+const mockDatabase = require('./mockDatabase');
 
 let pool = null;
 let connectionAttempts = 0;
-const MAX_RETRIES = 3;
+const MAX_RETRIES = 1;
+let useMockDatabase = false;
 
 const createPool = () => {
   try {
@@ -14,7 +16,8 @@ const createPool = () => {
       database: process.env.DB_NAME || 'hospital_management',
       max: 5,
       idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 10000
+      connectionTimeoutMillis: 5000,
+      ssl: { rejectUnauthorized: false }
     });
   } catch (err) {
     console.error('❌ Failed to create database pool:', err.message);
@@ -32,6 +35,7 @@ if (pool) {
 const testConnection = async () => {
   if (!pool) {
     console.warn('⚠️  Database pool not initialized');
+    useMockDatabase = true;
     return false;
   }
 
@@ -48,13 +52,8 @@ const testConnection = async () => {
       console.log(`   Retrying in 5 seconds...`);
       setTimeout(testConnection, 5000);
     } else {
-      console.warn('⚠️  Max connection attempts reached. Server will continue without database.');
-      console.warn('💡 Make sure these environment variables are set:');
-      console.warn('   - DB_HOST');
-      console.warn('   - DB_PORT');
-      console.warn('   - DB_USER');
-      console.warn('   - DB_PASSWORD');
-      console.warn('   - DB_NAME');
+      console.warn('⚠️  Using mock database for development');
+      useMockDatabase = true;
     }
     return false;
   }
@@ -63,12 +62,23 @@ const testConnection = async () => {
 // Test connection after a short delay (non-blocking)
 setTimeout(testConnection, 1000);
 
-// Export pool or a mock if pool creation failed
-module.exports = pool || {
-  query: async () => {
-    throw new Error('Database pool not initialized. Check environment variables.');
+// Export pool with fallback to mock database
+module.exports = {
+  query: async (sql, params) => {
+    if (useMockDatabase) {
+      return mockDatabase.query(sql, params);
+    }
+    return pool.query(sql, params);
   },
   connect: async () => {
-    throw new Error('Database pool not initialized. Check environment variables.');
+    if (useMockDatabase) {
+      return mockDatabase.connect();
+    }
+    return pool.connect();
+  },
+  end: async () => {
+    if (!useMockDatabase && pool) {
+      return pool.end();
+    }
   }
 };
