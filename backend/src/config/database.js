@@ -5,27 +5,30 @@ let connectionAttempts = 0;
 const MAX_RETRIES = 3;
 
 const createPool = () => {
-  return mysql.createPool({
-    host: process.env.DB_HOST,
-    port: process.env.DB_PORT || 3306,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
-    waitForConnections: true,
-    connectionLimit: 5,
-    queueLimit: 0,
-    enableKeepAlive: true,
-    keepAliveInitialDelayMs: 0,
-    connectionTimeout: 10000
-  });
+  try {
+    return mysql.createPool({
+      host: process.env.DB_HOST || 'localhost',
+      port: process.env.DB_PORT || 3306,
+      user: process.env.DB_USER || 'root',
+      password: process.env.DB_PASSWORD || '',
+      database: process.env.DB_NAME || 'hospital_management',
+      waitForConnections: true,
+      connectionLimit: 5,
+      queueLimit: 0,
+      enableKeepAlive: true,
+      keepAliveInitialDelayMs: 0,
+      connectionTimeout: 10000
+    });
+  } catch (err) {
+    console.error('❌ Failed to create database pool:', err.message);
+    return null;
+  }
 };
 
-// Initialize pool
-try {
-  pool = createPool();
+// Initialize pool immediately
+pool = createPool();
+if (pool) {
   console.log('📦 Database pool created');
-} catch (err) {
-  console.error('❌ Failed to create database pool:', err.message);
 }
 
 // Test connection asynchronously (non-blocking)
@@ -62,4 +65,12 @@ const testConnection = async () => {
 // Test connection after a short delay (non-blocking)
 setTimeout(testConnection, 1000);
 
-module.exports = pool;
+// Export pool or a mock if pool creation failed
+module.exports = pool || {
+  query: async () => {
+    throw new Error('Database pool not initialized. Check environment variables.');
+  },
+  getConnection: async () => {
+    throw new Error('Database pool not initialized. Check environment variables.');
+  }
+};
