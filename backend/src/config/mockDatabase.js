@@ -98,8 +98,10 @@ const query = async (sql, params = []) => {
     return makeResult([{ id: newUser.id }]);
   }
 
-  // Generic COUNT(*) queries (real Postgres always returns exactly one row here)
-  if (/SELECT\s+COUNT\(\*\)/i.test(sql)) {
+  // Standalone COUNT(*) queries (real Postgres always returns exactly one row here).
+  // Anchored to the start so this doesn't match queries that merely contain a
+  // COUNT(*) subquery alongside other selected columns (e.g. `SELECT h.*, (SELECT COUNT(*)...)`).
+  if (/^\s*SELECT\s+COUNT\(\*\)/i.test(sql)) {
     return makeResult([{ count: 0 }]);
   }
 
