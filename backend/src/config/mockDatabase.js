@@ -48,6 +48,15 @@ const mockData = {
   doctors: []
 };
 
+// Hybrid result: array-destructurable as [rows, fields] (MySQL-style callers)
+// while also exposing .rows/.rowCount (PostgreSQL-style callers)
+const makeResult = (rows) => {
+  const result = [rows, []];
+  result.rows = rows;
+  result.rowCount = rows.length;
+  return result;
+};
+
 // Mock query function
 const query = async (sql, params = []) => {
   console.log('📝 Mock Query:', sql.substring(0, 80) + '...');
@@ -58,25 +67,18 @@ const query = async (sql, params = []) => {
     const user = mockData.users.find(u => u.email === email && u.is_active);
     if (user) {
       const hospital = mockData.hospitals.find(h => h.id === user.hospital_id);
-      return {
-        rows: [{ ...user, hospital_name: hospital?.name }],
-        rowCount: 1
-      };
+      return makeResult([{ ...user, hospital_name: hospital?.name }]);
     }
-    return {
-      rows: [],
-      rowCount: 0
-    };
+    return makeResult([]);
   }
 
-  // SELECT user by id
-  if (sql.includes('SELECT u.id, u.email') && sql.includes('WHERE u.id')) {
+  // SELECT user by id (used by auth middleware to validate the token on every request)
+  if (sql.includes('FROM users') && sql.includes('WHERE id')) {
     const id = params[0];
-    const user = mockData.users.find(u => u.id === id);
-    return {
-      rows: user ? [{ ...user, password_hash: undefined }] : [],
-      rowCount: user ? 1 : 0
-    };
+    const user = mockData.users.find(u => u.id === id && u.is_active);
+    if (!user) return makeResult([]);
+    const { password_hash, ...safeUser } = user;
+    return makeResult([safeUser]);
   }
 
   // INSERT user
@@ -93,17 +95,11 @@ const query = async (sql, params = []) => {
       created_at: new Date()
     };
     mockData.users.push(newUser);
-    return {
-      rows: [{ id: newUser.id }],
-      rowCount: 1
-    };
+    return makeResult([{ id: newUser.id }]);
   }
 
   // Default response
-  return {
-    rows: [],
-    rowCount: 0
-  };
+  return makeResult([]);
 };
 
 // Mock connect function

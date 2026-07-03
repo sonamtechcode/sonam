@@ -38,28 +38,29 @@ api.interceptors.response.use(
   (error) => {
     const status = error.response?.status
     const message = error.response?.data?.message || error.message || 'An error occurred'
+    const url = error.config?.url
     
-    console.error('❌ Response error:', {
+    console.error('❌ API Error:', {
       status,
       message,
-      url: error.config?.url
+      url
     })
 
-    // Only logout on 401 Unauthorized (invalid/expired token)
-    // Do NOT logout on other errors
+    // ONLY logout on 401 - token is invalid/expired
     if (status === 401) {
-      console.warn('⚠️ Unauthorized - Token invalid or expired')
-      localStorage.removeItem('token')
-      localStorage.removeItem('user')
+      console.warn('⚠️ Token expired - redirecting to login')
+      localStorage.clear()
       delete api.defaults.headers.common['Authorization']
+      // Redirect after short delay
       setTimeout(() => {
-        window.location.replace('/login')
-      }, 1000)
+        window.location.href = '/login'
+      }, 500)
       return Promise.reject(error)
     }
 
-    // For all other errors, just show toast
-    if (status !== 404 && status !== 200) {
+    // For all other errors (500, 404, network, etc), just reject without logging out
+    // Let the component handle the error
+    if (message) {
       toast.error(message)
     }
 
