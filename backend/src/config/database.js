@@ -68,7 +68,28 @@ module.exports = {
     if (useMockDatabase) {
       return mockDatabase.query(sql, params);
     }
-    return pool.query(sql, params);
+    
+    try {
+      // Convert MySQL ? placeholders to PostgreSQL $1, $2, etc if needed
+      let pgSql = sql;
+      let pgParams = params || [];
+      
+      if (sql.includes('?')) {
+        let placeholderIndex = 1;
+        pgSql = sql.replace(/\?/g, () => `$${placeholderIndex++}`);
+      }
+      
+      const result = await pool.query(pgSql, pgParams);
+      
+      // Return in MySQL format [rows, fields] for backwards compatibility with existing code
+      return [result.rows, result.fields];
+    } catch (error) {
+      console.error('Query error:', {
+        sql: sql.substring(0, 100),
+        error: error.message
+      });
+      throw error;
+    }
   },
   connect: async () => {
     if (useMockDatabase) {

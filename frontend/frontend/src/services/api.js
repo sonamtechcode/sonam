@@ -36,25 +36,30 @@ api.interceptors.response.use(
     return response
   },
   (error) => {
+    const status = error.response?.status
+    const message = error.response?.data?.message || error.message || 'An error occurred'
+    
     console.error('❌ Response error:', {
-      status: error.response?.status,
-      message: error.response?.data?.message || error.message,
+      status,
+      message,
       url: error.config?.url
     })
 
-    if (error.response?.status === 401) {
-      console.warn('⚠️ Unauthorized - Token might be invalid')
+    // Only logout on 401 Unauthorized (invalid/expired token)
+    // Do NOT logout on other errors
+    if (status === 401) {
+      console.warn('⚠️ Unauthorized - Token invalid or expired')
       localStorage.removeItem('token')
       localStorage.removeItem('user')
-      // Use replace to prevent going back to dashboard
+      delete api.defaults.headers.common['Authorization']
       setTimeout(() => {
         window.location.replace('/login')
-      }, 500)
+      }, 1000)
+      return Promise.reject(error)
     }
 
-    // Only show error toast if not 401 (to avoid spam)
-    if (error.response?.status !== 401) {
-      const message = error.response?.data?.message || error.message || 'An error occurred'
+    // For all other errors, just show toast
+    if (status !== 404 && status !== 200) {
       toast.error(message)
     }
 
