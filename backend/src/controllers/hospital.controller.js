@@ -4,7 +4,7 @@ const bcrypt = require('bcryptjs');
 // Get all hospitals/clinics
 exports.getAllHospitals = async (req, res) => {
   try {
-    const [hospitals] = await db.query(
+    const result = await db.query(
       `SELECT h.*, 
         (SELECT COUNT(*) FROM users WHERE hospital_id = h.id) as user_count,
         (SELECT COUNT(*) FROM patients WHERE hospital_id = h.id) as patient_count,
@@ -12,9 +12,11 @@ exports.getAllHospitals = async (req, res) => {
        FROM hospitals h 
        ORDER BY h.created_at DESC`
     );
+    const hospitals = result.rows;
 
     res.json({ success: true, data: hospitals });
   } catch (error) {
+    console.error('Get all hospitals error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -24,20 +26,37 @@ exports.getHospital = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const [hospitals] = await db.query('SELECT * FROM hospitals WHERE id = ?', [id]);
+    const result = await db.query('SELECT * FROM hospitals WHERE id = $1', [id]);
+    const hospitals = result.rows;
 
     if (hospitals.length === 0) {
       return res.status(404).json({ success: false, message: 'Hospital not found' });
     }
 
-    // Get clinic settings
-    const [settings] = await db.query('SELECT * FROM clinic_settings WHERE hospital_id = ?', [id]);
+    // Get clinic settings - if they exist
+    try {
+      const settingsResult = await db.query('SELECT * FROM clinic_settings WHERE hospital_id = $1', [id]);
+      const settings = settingsResult.rows[0] || null;
 
-    res.json({ 
-      success: true, 
-      data: {
-        ...hospitals[0],
-        settings: settings[0] || null
+      res.json({ 
+        success: true, 
+        data: {
+          ...hospitals[0],
+          settings
+        }
+      });
+    } catch (err) {
+      // Clinic settings table might not exist, just return hospital data
+      res.json({ 
+        success: true, 
+        data: hospitals[0]
+      });
+    }
+  } catch (error) {
+    console.error('Get hospital error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
       }
     });
   } catch (error) {

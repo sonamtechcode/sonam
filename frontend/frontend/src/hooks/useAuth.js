@@ -20,16 +20,17 @@ export function useAuth() {
 
   const login = async (email, password) => {
     const response = await api.post('/auth/login', { email, password })
-    console.log('Login response:', response.data) // Debug log
+    console.log('🔐 Login response:', response.data) // Debug log
     
-    // Handle both response formats
-    const data = response.data.data || response.data
-    const token = data.token || response.data.token
-    const user = data.user || response.data.user
+    const { token, user, success } = response.data
     
-    if (!token || !user) {
-      throw new Error('Invalid response from server')
+    if (!success || !token || !user) {
+      console.error('❌ Login failed - missing data:', { token: !!token, user: !!user, success })
+      throw new Error('Invalid response from server - missing token or user')
     }
+    
+    console.log('✅ Token received:', token.substring(0, 20) + '...')
+    console.log('✅ User received:', user.email)
     
     localStorage.setItem('token', token)
     localStorage.setItem('user', JSON.stringify(user))

@@ -45,6 +45,8 @@ exports.login = async (req, res) => {
     }
 
     const user = users[0];
+    console.log('📊 User found:', user.email, 'Has password_hash:', !!user.password_hash);
+    
     const isValidPassword = await bcrypt.compare(password, user.password_hash);
 
     if (!isValidPassword) {
@@ -53,14 +55,19 @@ exports.login = async (req, res) => {
 
     const token = jwt.sign(
       { id: user.id, email: user.email, role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRE }
+      process.env.JWT_SECRET || 'default_jwt_secret_key_for_development_only_min32_chars_needed_here',
+      { expiresIn: process.env.JWT_EXPIRE || '7d' }
     );
+
+    console.log('✅ Token generated for user:', user.email);
+    console.log('🔑 JWT_SECRET check:', process.env.JWT_SECRET ? '✅ Set' : '❌ Not set');
+    console.log('📝 Token length:', token?.length || 'N/A');
 
     delete user.password_hash;
 
-    res.json({
+    return res.status(200).json({
       success: true,
+      message: 'Login successful',
       token,
       user
     });
@@ -89,7 +96,8 @@ exports.forgotPassword = async (req, res) => {
     const { email } = req.body;
 
     // Check if user exists
-    const [users] = await db.query('SELECT id, name, email FROM users WHERE email = ? AND is_active = 1', [email]);
+    const result = await db.query('SELECT id, first_name, email FROM users WHERE email = $1 AND is_active = true', [email]);
+    const users = result.rows;
     
     if (users.length === 0) {
       return res.status(404).json({ success: false, message: 'No account found with this email' });
@@ -106,17 +114,17 @@ exports.forgotPassword = async (req, res) => {
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
 
     // Delete any existing tokens for this user
-    await db.query('DELETE FROM password_reset_tokens WHERE user_id = ?', [user.id]);
+    await db.query('DELETE FROM password_reset_tokens WHERE user_id = $1', [user.id]);
 
     // Save token to database
     await db.query(
-      'INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (?, ?, ?)',
+      'INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)',
       [user.id, hashedToken, expiresAt]
     );
 
     // Send email
     const { sendPasswordResetEmail } = require('../utils/emailService');
-    const emailResult = await sendPasswordResetEmail(user.email, resetToken, user.name);
+    const emailResult = await sendPasswordResetEmail(user.email, resetToken, user.first_name);
 
     if (!emailResult.success) {
       return res.status(500).json({ 
@@ -142,11 +150,12 @@ exports.verifyResetToken = async (req, res) => {
     const crypto = require('crypto');
     const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
 
-    const [tokens] = await db.query(
+    const result = await db.query(
       `SELECT * FROM password_reset_tokens 
-       WHERE token = ? AND expires_at > NOW() AND used = 0`,
+       WHERE token = $1 AND expires_at > NOW() AND used = false`,
       [hashedToken]
     );
+    const tokens = result.rows;
 
     if (tokens.length === 0) {
       return res.status(400).json({ 
@@ -176,11 +185,12 @@ exports.resetPassword = async (req, res) => {
     const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
 
     // Verify token
-    const [tokens] = await db.query(
+    const result = await db.query(
       `SELECT * FROM password_reset_tokens 
-       WHERE token = ? AND expires_at > NOW() AND used = 0`,
+       WHERE token = $1 AND expires_at > NOW() AND used = false`,
       [hashedToken]
     );
+    const tokens = result.rows;
 
     if (tokens.length === 0) {
       return res.status(400).json({ 
@@ -196,20 +206,20 @@ exports.resetPassword = async (req, res) => {
 
     // Update user password
     await db.query(
-      'UPDATE users SET password = ? WHERE id = ?',
+      'UPDATE users SET password_hash = $1 WHERE id = $2',
       [hashedPassword, resetToken.user_id]
     );
 
     // Mark token as used
     await db.query(
-      'UPDATE password_reset_tokens SET used = 1 WHERE id = ?',
+      'UPDATE password_reset_tokens SET used = true WHERE id = $1',
       [resetToken.id]
     );
 
     // Create notification
     await db.query(
       `INSERT INTO notifications (user_id, title, message, type) 
-       VALUES (?, ?, ?, ?)`,
+       VALUES ($1, $2, $3, $4)`,
       [
         resetToken.user_id,
         'Password Changed',
