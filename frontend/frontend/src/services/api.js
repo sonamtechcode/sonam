@@ -43,13 +43,20 @@ api.interceptors.response.use(
     })
 
     if (error.response?.status === 401) {
+      console.warn('⚠️ Unauthorized - Token might be invalid')
       localStorage.removeItem('token')
       localStorage.removeItem('user')
-      window.location.href = '/login'
+      // Use replace to prevent going back to dashboard
+      setTimeout(() => {
+        window.location.replace('/login')
+      }, 500)
     }
 
-    const message = error.response?.data?.message || error.message || 'An error occurred'
-    toast.error(message)
+    // Only show error toast if not 401 (to avoid spam)
+    if (error.response?.status !== 401) {
+      const message = error.response?.data?.message || error.message || 'An error occurred'
+      toast.error(message)
+    }
 
     return Promise.reject(error)
   }
