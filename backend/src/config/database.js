@@ -3,7 +3,7 @@ const mockDatabase = require('./mockDatabase');
 
 let pool = null;
 let connectionAttempts = 0;
-const MAX_RETRIES = 1;
+const MAX_RETRIES = 4;
 let useMockDatabase = false;
 
 const createPool = () => {
@@ -16,11 +16,11 @@ const createPool = () => {
       database: process.env.DB_NAME || 'hospital_management',
       max: 5,
       idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 5000,
+      connectionTimeoutMillis: 15000,
       ssl: { rejectUnauthorized: false }
     });
   } catch (err) {
-    console.error('❌ Failed to create database pool:', err.message);
+    console.error(`❌ Failed to create database pool: [${err.code || 'NO_CODE'}] ${err.message}`);
     return null;
   }
 };
@@ -31,7 +31,8 @@ if (pool) {
   console.log('📦 Database pool created');
 }
 
-// Test connection asynchronously (non-blocking)
+// Test connection asynchronously (non-blocking), with a few retries since a cold
+// container's first outbound TLS handshake to a remote pooler can be slow.
 const testConnection = async () => {
   if (!pool) {
     console.warn('⚠️  Database pool not initialized');
@@ -46,8 +47,8 @@ const testConnection = async () => {
     return true;
   } catch (err) {
     connectionAttempts++;
-    console.warn(`⚠️  Database connection attempt ${connectionAttempts}/${MAX_RETRIES} failed:`, err.message);
-    
+    console.warn(`⚠️  Database connection attempt ${connectionAttempts}/${MAX_RETRIES} failed: [${err.code || 'NO_CODE'}] ${err.message}`);
+
     if (connectionAttempts < MAX_RETRIES) {
       console.log(`   Retrying in 5 seconds...`);
       setTimeout(testConnection, 5000);
