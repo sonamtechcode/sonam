@@ -98,6 +98,11 @@ const query = async (sql, params = []) => {
     return makeResult([{ id: newUser.id }]);
   }
 
+  // Generic COUNT(*) queries (real Postgres always returns exactly one row here)
+  if (/SELECT\s+COUNT\(\*\)/i.test(sql)) {
+    return makeResult([{ count: 0 }]);
+  }
+
   // Default response
   return makeResult([]);
 };
