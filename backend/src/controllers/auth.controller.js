@@ -45,6 +45,8 @@ exports.login = async (req, res) => {
     }
 
     const user = users[0];
+    console.log('📊 User found:', user.email, 'Has password_hash:', !!user.password_hash);
+    
     const isValidPassword = await bcrypt.compare(password, user.password_hash);
 
     if (!isValidPassword) {
@@ -53,17 +55,15 @@ exports.login = async (req, res) => {
 
     const token = jwt.sign(
       { id: user.id, email: user.email, role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRE }
+      process.env.JWT_SECRET || 'default_jwt_secret_key_for_development_only_min32_chars_needed_here',
+      { expiresIn: process.env.JWT_EXPIRE || '7d' }
     );
 
-    delete user.password_hash;
+    console.log('✅ Token generated for user:', user.email);
+    console.log('🔑 JWT_SECRET check:', process.env.JWT_SECRET ? '✅ Set' : '❌ Not set');
+    console.log('📝 Token length:', token?.length || 'N/A');
 
-    res.json({
-      success: true,
-      token,
-      user
-    });
+    delete user.password_hash;
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ success: false, message: error.message });
