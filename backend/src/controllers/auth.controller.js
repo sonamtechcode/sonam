@@ -65,7 +65,7 @@ exports.login = async (req, res) => {
 
     delete user.password_hash;
 
-    return res.json({
+    return res.status(200).json({
       success: true,
       message: 'Login successful',
       token,
