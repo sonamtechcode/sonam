@@ -80,9 +80,14 @@ module.exports = {
       }
       
       const result = await pool.query(pgSql, pgParams);
-      
-      // Return in MySQL format [rows, fields] for backwards compatibility with existing code
-      return [result.rows, result.fields];
+
+      // Hybrid result: array-destructurable as [rows, fields] (MySQL-style callers)
+      // while also exposing .rows/.rowCount/.fields (PostgreSQL-style callers)
+      const hybrid = [result.rows, result.fields];
+      hybrid.rows = result.rows;
+      hybrid.rowCount = result.rowCount;
+      hybrid.fields = result.fields;
+      return hybrid;
     } catch (error) {
       console.error('Query error:', {
         sql: sql.substring(0, 100),
