@@ -9,7 +9,10 @@ exports.authenticate = async (req, res, next) => {
       return res.status(401).json({ success: false, message: 'No token provided' });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(
+      token,
+      process.env.JWT_SECRET || 'default_jwt_secret_key_for_development_only_min32_chars_needed_here'
+    );
     
     const [users] = await db.query(
       'SELECT id, email, role, hospital_id FROM users WHERE id = ? AND is_active = 1',
