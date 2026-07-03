@@ -30,8 +30,8 @@ export default function Login() {
     try {
       await login(values.email, values.password)
       toast.success('Login successful!')
-      // Force a full page reload to ensure all components re-render with new auth state
-      window.location.href = '/'
+      // Navigate to dashboard instead of full page reload
+      navigate('/', { replace: true })
     } catch (error) {
       toast.error('Invalid credentials')
     }
