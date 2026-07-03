@@ -3,15 +3,16 @@ const db = require('../config/database');
 // Get all doctor leaves
 exports.getDoctorLeaves = async (req, res) => {
   try {
-    const { hospitalId } = req.user;
+    const hospitalId = req.user.hospital_id;
     const { doctorId, status } = req.query;
 
     let query = `
-      SELECT dl.*, d.name as doctor_name, d.specialization,
-             u.name as approved_by_name
+      SELECT dl.*, (du.first_name || ' ' || du.last_name) as doctor_name, d.specialization,
+             (au.first_name || ' ' || au.last_name) as approved_by_name
       FROM doctor_leaves dl
       JOIN doctors d ON dl.doctor_id = d.id
-      LEFT JOIN users u ON dl.approved_by = u.id
+      LEFT JOIN users du ON d.user_id = du.id
+      LEFT JOIN users au ON dl.approved_by = au.id
       WHERE dl.hospital_id = ?
     `;
     const params = [hospitalId];
@@ -39,7 +40,7 @@ exports.getDoctorLeaves = async (req, res) => {
 // Apply for leave
 exports.applyLeave = async (req, res) => {
   try {
-    const { hospitalId, userId } = req.user;
+    const hospitalId = req.user.hospital_id;
     const {
       doctor_id,
       leave_type,
@@ -54,9 +55,9 @@ exports.applyLeave = async (req, res) => {
       WHERE doctor_id = ? AND hospital_id = ?
       AND status != 'rejected'
       AND (
-        (start_date <= ? AND end_date >= ?) OR
-        (start_date <= ? AND end_date >= ?) OR
-        (start_date >= ? AND end_date <= ?)
+        (leave_start_date <= ? AND leave_end_date >= ?) OR
+        (leave_start_date <= ? AND leave_end_date >= ?) OR
+        (leave_start_date >= ? AND leave_end_date <= ?)
       )
     `, [doctor_id, hospitalId, start_date, start_date, end_date, end_date, start_date, end_date]);
 
@@ -66,14 +67,14 @@ exports.applyLeave = async (req, res) => {
 
     const [result] = await db.query(`
       INSERT INTO doctor_leaves (
-        doctor_id, hospital_id, leave_type, start_date, end_date,
+        doctor_id, hospital_id, leave_type, leave_start_date, leave_end_date,
         reason, status, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, 'pending', NOW())
+      ) VALUES (?, ?, ?, ?, ?, ?, 'pending', NOW()) RETURNING id
     `, [doctor_id, hospitalId, leave_type, start_date, end_date, reason]);
 
     res.status(201).json({
       message: 'Leave application submitted successfully',
-      id: result.insertId
+      id: result[0]?.id
     });
   } catch (error) {
     console.error('Apply leave error:', error);
@@ -85,18 +86,21 @@ exports.applyLeave = async (req, res) => {
 exports.updateLeaveStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const { hospitalId, userId } = req.user;
+    const hospitalId = req.user.hospital_id;
+    const userId = req.user.id;
     const { status, rejection_reason } = req.body;
 
     if (!['approved', 'rejected'].includes(status)) {
       return res.status(400).json({ message: 'Invalid status' });
     }
 
+    // NOTE: doctor_leaves has no approved_at/rejection_reason columns in the real schema,
+    // so those can't be persisted. Only status + approved_by are stored.
     await db.query(`
-      UPDATE doctor_leaves 
-      SET status = ?, approved_by = ?, approved_at = NOW(), rejection_reason = ?
+      UPDATE doctor_leaves
+      SET status = ?, approved_by = ?
       WHERE id = ? AND hospital_id = ?
-    `, [status, userId, rejection_reason || null, id, hospitalId]);
+    `, [status, userId, id, hospitalId]);
 
     res.json({ message: `Leave ${status} successfully` });
   } catch (error) {
@@ -109,10 +113,10 @@ exports.updateLeaveStatus = async (req, res) => {
 exports.cancelLeave = async (req, res) => {
   try {
     const { id } = req.params;
-    const { hospitalId } = req.user;
+    const hospitalId = req.user.hospital_id;
 
     await db.query(`
-      UPDATE doctor_leaves 
+      UPDATE doctor_leaves
       SET status = 'cancelled'
       WHERE id = ? AND hospital_id = ? AND status = 'pending'
     `, [id, hospitalId]);
@@ -128,24 +132,28 @@ exports.cancelLeave = async (req, res) => {
 exports.getLeaveBalance = async (req, res) => {
   try {
     const { doctorId } = req.params;
-    const { hospitalId } = req.user;
+    const hospitalId = req.user.hospital_id;
 
     const [leaves] = await db.query(`
-      SELECT 
+      SELECT
         leave_type,
         COUNT(*) as count,
-        SUM(DATEDIFF(end_date, start_date) + 1) as total_days
+        SUM((leave_end_date - leave_start_date) + 1) as total_days
       FROM doctor_leaves
       WHERE doctor_id = ? AND hospital_id = ?
       AND status = 'approved'
-      AND YEAR(start_date) = YEAR(CURDATE())
+      AND EXTRACT(YEAR FROM leave_start_date) = EXTRACT(YEAR FROM CURRENT_DATE)
       GROUP BY leave_type
     `, [doctorId, hospitalId]);
 
+    // Keys must match the doctor_leaves.leave_type CHECK constraint values
+    // ('sick', 'casual', 'emergency', 'vacation', 'training').
     const balance = {
-      sick_leave: { taken: 0, total: 12 },
-      casual_leave: { taken: 0, total: 15 },
-      earned_leave: { taken: 0, total: 20 }
+      sick: { taken: 0, total: 12 },
+      casual: { taken: 0, total: 15 },
+      emergency: { taken: 0, total: 5 },
+      vacation: { taken: 0, total: 20 },
+      training: { taken: 0, total: 5 }
     };
 
     leaves.forEach(leave => {

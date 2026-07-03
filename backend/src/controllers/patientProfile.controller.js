@@ -1,5 +1,32 @@
 const db = require('../config/database');
 
+// NOTE: this controller originally targeted a much larger MySQL schema than the real
+// Supabase Postgres DB actually has. Tables that never existed in the real schema
+// (patient_medical_details, patient_visits, patient_procedures, lab_bookings, lab_tests,
+// patient_documents, patient_ledger, patient_followups, patient_consents) are substituted
+// with the closest real table where a reasonable one exists (e.g. appointments for
+// "visits", billing+payment for the financial ledger, patients' own columns for
+// "medical details"), and return an empty result (reads) or a 501 (writes) where no
+// reasonable substitute exists, rather than crashing with a raw DB error or inventing a
+// schema. This is flagged in detail in the final report.
+//
+// The original code also used MySQL's `INSERT/UPDATE ... SET ?` object-shorthand syntax,
+// which Postgres has no equivalent for (the `?` placeholder can't bind a whole object).
+// All writes below use an explicit, whitelisted column list instead.
+
+// Build a parameterized UPDATE from only the allowed columns present in `data`.
+const buildUpdateFields = (data, allowedColumns) => {
+  const cols = [];
+  const values = [];
+  for (const col of allowedColumns) {
+    if (Object.prototype.hasOwnProperty.call(data, col)) {
+      cols.push(col);
+      values.push(data[col]);
+    }
+  }
+  return { cols, values };
+};
+
 // Get Complete Patient Profile
 exports.getPatientProfile = async (req, res) => {
   try {
@@ -8,9 +35,10 @@ exports.getPatientProfile = async (req, res) => {
 
     // 1. Basic Patient Info
     const [patients] = await db.query(
-      `SELECT p.*, h.name as hospital_name 
-       FROM patients p 
-       LEFT JOIN hospitals h ON p.hospital_id = h.id 
+      `SELECT p.*, (p.first_name || ' ' || p.last_name) as name, p.patient_id_number as patient_id,
+              p.emergency_contact_phone as emergency_contact, h.name as hospital_name
+       FROM patients p
+       LEFT JOIN hospitals h ON p.hospital_id = h.id
        WHERE p.id = ? AND p.hospital_id = ?`,
       [patientId, hospital_id]
     );
@@ -33,111 +61,113 @@ exports.getPatientProfile = async (req, res) => {
       patient.calculated_age = age;
     }
 
-    // 2. Medical Details
-    const [medicalDetails] = await db.query(
-      'SELECT * FROM patient_medical_details WHERE patient_id = ? AND hospital_id = ?',
-      [patientId, hospital_id]
-    );
+    // 2. Medical Details — there's no separate patient_medical_details table; the real
+    // schema keeps these fields directly on patients.
+    const medicalDetails = {
+      height: patient.height,
+      weight: patient.weight,
+      bmi: patient.bmi,
+      allergies: patient.allergies,
+      chronic_conditions: patient.chronic_conditions,
+      current_medications: patient.current_medications,
+      insurance_provider: patient.insurance_provider,
+      insurance_policy_number: patient.insurance_policy_number,
+      insurance_expiry_date: patient.insurance_expiry_date
+    };
 
     // 3. Latest Vitals
     const [latestVitals] = await db.query(
-      `SELECT * FROM patient_vitals 
-       WHERE patient_id = ? AND hospital_id = ? 
+      `SELECT * FROM patient_vitals
+       WHERE patient_id = ? AND hospital_id = ?
        ORDER BY recorded_at DESC LIMIT 1`,
       [patientId, hospital_id]
     );
 
-    // 4. Visit History
+    // 4. Visit History — no patient_visits table; appointments is the closest real
+    // equivalent, so it's used as a best-effort substitute.
     const [visits] = await db.query(
-      `SELECT v.*, d.name as doctor_name, d.specialization 
-       FROM patient_visits v 
-       LEFT JOIN doctors d ON v.doctor_id = d.id 
-       WHERE v.patient_id = ? AND v.hospital_id = ? 
-       ORDER BY v.visit_date DESC, v.visit_time DESC`,
+      `SELECT a.*, a.appointment_date as visit_date, a.appointment_time as visit_time,
+              a.reason_for_visit as reason, (u.first_name || ' ' || u.last_name) as doctor_name,
+              d.specialization
+       FROM appointments a
+       LEFT JOIN doctors d ON a.doctor_id = d.id
+       LEFT JOIN users u ON d.user_id = u.id
+       WHERE a.patient_id = ? AND a.hospital_id = ?
+       ORDER BY a.appointment_date DESC, a.appointment_time DESC`,
       [patientId, hospital_id]
     );
 
     // 5. Prescriptions
     const [prescriptions] = await db.query(
-      `SELECT p.*, d.name as doctor_name 
-       FROM prescriptions p 
-       LEFT JOIN doctors d ON p.doctor_id = d.id 
-       WHERE p.patient_id = ? AND p.hospital_id = ? 
+      `SELECT p.*, (u.first_name || ' ' || u.last_name) as doctor_name
+       FROM digital_prescriptions p
+       LEFT JOIN doctors d ON p.doctor_id = d.id
+       LEFT JOIN users u ON d.user_id = u.id
+       WHERE p.patient_id = ? AND p.hospital_id = ?
        ORDER BY p.prescription_date DESC`,
       [patientId, hospital_id]
     );
 
-    // 6. Procedures/Treatments
-    const [procedures] = await db.query(
-      `SELECT pp.*, d.name as doctor_name 
-       FROM patient_procedures pp 
-       LEFT JOIN doctors d ON pp.doctor_id = d.id 
-       WHERE pp.patient_id = ? AND pp.hospital_id = ? 
-       ORDER BY pp.procedure_date DESC`,
-      [patientId, hospital_id]
-    );
+    // 6. Procedures/Treatments — no equivalent table in the real schema.
+    const procedures = [];
 
     // 7. Lab Reports
     const [labReports] = await db.query(
-      `SELECT lb.*, lt.test_name, lt.test_code, d.name as doctor_name 
-       FROM lab_bookings lb 
-       LEFT JOIN lab_tests lt ON lb.test_id = lt.id 
-       LEFT JOIN doctors d ON lb.doctor_id = d.id 
-       WHERE lb.patient_id = ? AND lb.hospital_id = ? 
-       ORDER BY lb.created_at DESC`,
+      `SELECT lr.*, (u.first_name || ' ' || u.last_name) as doctor_name
+       FROM lab_reports lr
+       LEFT JOIN users u ON lr.ordered_by = u.id
+       WHERE lr.patient_id = ? AND lr.hospital_id = ?
+       ORDER BY lr.created_at DESC`,
       [patientId, hospital_id]
     );
 
-    // 8. Documents
-    const [documents] = await db.query(
-      'SELECT * FROM patient_documents WHERE patient_id = ? AND hospital_id = ? ORDER BY upload_date DESC',
-      [patientId, hospital_id]
-    );
+    // 8. Documents — no equivalent table in the real schema.
+    const documents = [];
 
-    // 9. Billing Summary
-    const [billingSummary] = await db.query(
-      `SELECT 
-        SUM(debit) as total_amount,
-        SUM(credit) as paid_amount,
-        (SUM(debit) - SUM(credit)) as due_amount
-       FROM patient_ledger 
-       WHERE patient_id = ? AND hospital_id = ?`,
+    // 9. Billing Summary — no patient_ledger table; derived from billing + payment.
+    const [billingTotals] = await db.query(
+      `SELECT COALESCE(SUM(total_amount), 0) as total_amount
+       FROM billing WHERE patient_id = ? AND hospital_id = ?`,
       [patientId, hospital_id]
     );
+    const [paymentTotals] = await db.query(
+      `SELECT COALESCE(SUM(amount), 0) as paid_amount
+       FROM payment WHERE patient_id = ? AND hospital_id = ? AND status = 'completed'`,
+      [patientId, hospital_id]
+    );
+    const totalAmount = parseFloat(billingTotals[0].total_amount) || 0;
+    const paidAmount = parseFloat(paymentTotals[0].paid_amount) || 0;
+    const billingSummary = {
+      total_amount: totalAmount,
+      paid_amount: paidAmount,
+      due_amount: totalAmount - paidAmount
+    };
 
     // 10. Recent Transactions
     const [transactions] = await db.query(
-      `SELECT * FROM patient_ledger 
-       WHERE patient_id = ? AND hospital_id = ? 
-       ORDER BY transaction_date DESC LIMIT 10`,
+      `SELECT * FROM payment
+       WHERE patient_id = ? AND hospital_id = ?
+       ORDER BY payment_date DESC LIMIT 10`,
       [patientId, hospital_id]
     );
 
-    // 11. Follow-ups
-    const [followups] = await db.query(
-      `SELECT * FROM patient_followups 
-       WHERE patient_id = ? AND hospital_id = ? AND status = 'pending'
-       ORDER BY followup_date ASC`,
-      [patientId, hospital_id]
-    );
+    // 11. Follow-ups — no equivalent table in the real schema.
+    const followups = [];
 
     // 12. Communication Logs
     const [communications] = await db.query(
-      `SELECT * FROM patient_communications 
-       WHERE patient_id = ? AND hospital_id = ? 
+      `SELECT * FROM patient_communication_log
+       WHERE patient_id = ? AND hospital_id = ?
        ORDER BY sent_at DESC LIMIT 20`,
       [patientId, hospital_id]
     );
 
-    // 13. Consents
-    const [consents] = await db.query(
-      'SELECT * FROM patient_consents WHERE patient_id = ? AND hospital_id = ? ORDER BY consent_date DESC',
-      [patientId, hospital_id]
-    );
+    // 13. Consents — no equivalent table in the real schema.
+    const consents = [];
 
     // 14. Feedback
     const [feedback] = await db.query(
-      'SELECT * FROM patient_feedback WHERE patient_id = ? AND hospital_id = ? ORDER BY feedback_date DESC',
+      'SELECT * FROM patient_feedback WHERE patient_id = ? AND hospital_id = ? ORDER BY created_at DESC',
       [patientId, hospital_id]
     );
 
@@ -145,19 +175,19 @@ exports.getPatientProfile = async (req, res) => {
       success: true,
       data: {
         basicInfo: patient,
-        medicalDetails: medicalDetails[0] || null,
+        medicalDetails,
         latestVitals: latestVitals[0] || null,
-        visits: visits,
-        prescriptions: prescriptions,
-        procedures: procedures,
-        labReports: labReports,
-        documents: documents,
-        billingSummary: billingSummary[0],
+        visits,
+        prescriptions,
+        procedures,
+        labReports,
+        documents,
+        billingSummary,
         recentTransactions: transactions,
-        followups: followups,
-        communications: communications,
-        consents: consents,
-        feedback: feedback
+        followups,
+        communications,
+        consents,
+        feedback
       }
     });
   } catch (error) {
@@ -170,9 +200,32 @@ exports.getPatientProfile = async (req, res) => {
 exports.updatePatientBasicInfo = async (req, res) => {
   try {
     const { patientId } = req.params;
-    const updateData = req.body;
+    const updateData = { ...req.body };
 
-    await db.query('UPDATE patients SET ? WHERE id = ?', [updateData, patientId]);
+    if (updateData.name) {
+      const parts = String(updateData.name).trim().split(/\s+/);
+      updateData.first_name = parts[0];
+      updateData.last_name = parts.slice(1).join(' ') || '-';
+    }
+    if (updateData.age !== undefined && updateData.age !== null && updateData.age !== '') {
+      updateData.date_of_birth = `${new Date().getFullYear() - parseInt(updateData.age, 10)}-01-01`;
+    }
+
+    const allowedColumns = [
+      'first_name', 'last_name', 'date_of_birth', 'gender', 'blood_group', 'phone', 'email',
+      'address', 'city', 'state', 'country', 'postal_code', 'emergency_contact_name',
+      'emergency_contact_phone', 'emergency_contact_relation', 'insurance_provider',
+      'insurance_policy_number', 'insurance_expiry_date', 'allergies', 'chronic_conditions',
+      'current_medications', 'height', 'weight', 'bmi', 'status'
+    ];
+    const { cols, values } = buildUpdateFields(updateData, allowedColumns);
+
+    if (cols.length === 0) {
+      return res.status(400).json({ success: false, message: 'No updatable fields provided' });
+    }
+
+    const setClause = cols.map(c => `${c} = ?`).join(', ');
+    await db.query(`UPDATE patients SET ${setClause}, updated_at = NOW() WHERE id = ?`, [...values, patientId]);
 
     res.json({ success: true, message: 'Patient info updated successfully' });
   } catch (error) {
@@ -180,34 +233,33 @@ exports.updatePatientBasicInfo = async (req, res) => {
   }
 };
 
-// Update/Create Medical Details
+// Update Medical Details — there's no patient_medical_details table; this now updates
+// the equivalent columns directly on patients.
 exports.updateMedicalDetails = async (req, res) => {
   try {
     const { patientId } = req.params;
     const { hospital_id, ...medicalData } = req.body;
 
-    // Calculate BMI if height and weight provided
     if (medicalData.height && medicalData.weight) {
       const heightInMeters = medicalData.height / 100;
       medicalData.bmi = (medicalData.weight / (heightInMeters * heightInMeters)).toFixed(2);
     }
 
-    const [existing] = await db.query(
-      'SELECT id FROM patient_medical_details WHERE patient_id = ? AND hospital_id = ?',
-      [patientId, hospital_id]
-    );
+    const allowedColumns = [
+      'height', 'weight', 'bmi', 'allergies', 'chronic_conditions', 'current_medications',
+      'insurance_provider', 'insurance_policy_number', 'insurance_expiry_date'
+    ];
+    const { cols, values } = buildUpdateFields(medicalData, allowedColumns);
 
-    if (existing.length > 0) {
-      await db.query(
-        'UPDATE patient_medical_details SET ? WHERE patient_id = ? AND hospital_id = ?',
-        [medicalData, patientId, hospital_id]
-      );
-    } else {
-      await db.query(
-        'INSERT INTO patient_medical_details SET ?',
-        [{ patient_id: patientId, hospital_id, ...medicalData }]
-      );
+    if (cols.length === 0) {
+      return res.status(400).json({ success: false, message: 'No updatable fields provided' });
     }
+
+    const setClause = cols.map(c => `${c} = ?`).join(', ');
+    await db.query(
+      `UPDATE patients SET ${setClause}, updated_at = NOW() WHERE id = ? AND hospital_id = ?`,
+      [...values, patientId, hospital_id]
+    );
 
     res.json({ success: true, message: 'Medical details updated successfully' });
   } catch (error) {
@@ -219,194 +271,160 @@ exports.updateMedicalDetails = async (req, res) => {
 exports.addVitals = async (req, res) => {
   try {
     const { patientId } = req.params;
-    const vitalsData = { ...req.body, patient_id: patientId, recorded_by: req.user.id };
+    const data = { ...req.body, patient_id: patientId, recorded_by: req.user.id };
 
-    const [result] = await db.query('INSERT INTO patient_vitals SET ?', [vitalsData]);
+    const allowedColumns = [
+      'patient_id', 'hospital_id', 'recorded_by', 'temperature', 'blood_pressure_systolic',
+      'blood_pressure_diastolic', 'heart_rate', 'respiratory_rate', 'oxygen_saturation',
+      'blood_glucose', 'weight', 'height', 'bmi', 'notes'
+    ];
+    const { cols, values } = buildUpdateFields(data, allowedColumns);
+    if (!cols.includes('patient_id')) { cols.unshift('patient_id'); values.unshift(patientId); }
 
-    res.json({ success: true, message: 'Vitals recorded successfully', id: result.insertId });
+    const placeholders = cols.map(() => '?').join(', ');
+    const [result] = await db.query(
+      `INSERT INTO patient_vitals (${cols.join(', ')}, recorded_at) VALUES (${placeholders}, NOW()) RETURNING id`,
+      values
+    );
+
+    res.json({ success: true, message: 'Vitals recorded successfully', id: result[0]?.id });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Create Visit
+// Create Visit — no patient_visits table in the real schema; there's no reasonable
+// substitute for an arbitrary "create a visit" write (appointments have their own
+// dedicated create flow under /appointments), so this is left unsupported rather than
+// silently writing to the wrong table.
 exports.createVisit = async (req, res) => {
-  try {
-    const { patientId } = req.params;
-    const visitData = { ...req.body, patient_id: patientId };
-
-    const [result] = await db.query('INSERT INTO patient_visits SET ?', [visitData]);
-
-    res.json({ success: true, message: 'Visit created successfully', id: result.insertId });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
+  res.status(501).json({
+    success: false,
+    message: 'Visit records are not supported by the current database schema. Use the Appointments API instead.'
+  });
 };
 
-// Update Visit
 exports.updateVisit = async (req, res) => {
-  try {
-    const { visitId } = req.params;
-    const updateData = req.body;
-
-    await db.query('UPDATE patient_visits SET ? WHERE id = ?', [updateData, visitId]);
-
-    res.json({ success: true, message: 'Visit updated successfully' });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
+  res.status(501).json({
+    success: false,
+    message: 'Visit records are not supported by the current database schema. Use the Appointments API instead.'
+  });
 };
 
 // Add Prescription
 exports.addPrescription = async (req, res) => {
   try {
     const { patientId } = req.params;
-    const prescriptionData = { ...req.body, patient_id: patientId };
+    const { hospital_id, doctor_id, medicine_name, dosage, frequency, duration_days, instructions } = req.body;
 
-    // Convert medicines array to JSON
-    if (Array.isArray(prescriptionData.medicines)) {
-      prescriptionData.medicines = JSON.stringify(prescriptionData.medicines);
-    }
+    const [result] = await db.query(
+      `INSERT INTO digital_prescriptions (patient_id, hospital_id, doctor_id, medicine_name, dosage, frequency, duration_days, instructions, prescription_date, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_DATE, 'active') RETURNING id`,
+      [patientId, hospital_id, doctor_id, medicine_name, dosage, frequency, duration_days, instructions]
+    );
 
-    const [result] = await db.query('INSERT INTO prescriptions SET ?', [prescriptionData]);
-
-    res.json({ success: true, message: 'Prescription added successfully', id: result.insertId });
+    res.json({ success: true, message: 'Prescription added successfully', id: result[0]?.id });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Add Procedure
+// Add Procedure — no patient_procedures table in the real schema.
 exports.addProcedure = async (req, res) => {
-  try {
-    const { patientId } = req.params;
-    const procedureData = { ...req.body, patient_id: patientId };
-
-    // Convert arrays to JSON
-    if (procedureData.pre_images) procedureData.pre_images = JSON.stringify(procedureData.pre_images);
-    if (procedureData.post_images) procedureData.post_images = JSON.stringify(procedureData.post_images);
-    if (procedureData.consumables_used) procedureData.consumables_used = JSON.stringify(procedureData.consumables_used);
-
-    const [result] = await db.query('INSERT INTO patient_procedures SET ?', [procedureData]);
-
-    res.json({ success: true, message: 'Procedure added successfully', id: result.insertId });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
+  res.status(501).json({
+    success: false,
+    message: 'Procedure records are not supported by the current database schema.'
+  });
 };
 
-// Upload Document
+// Upload Document — no patient_documents table in the real schema.
 exports.uploadDocument = async (req, res) => {
-  try {
-    const { patientId } = req.params;
-    const documentData = { ...req.body, patient_id: patientId, uploaded_by: req.user.id };
-
-    const [result] = await db.query('INSERT INTO patient_documents SET ?', [documentData]);
-
-    res.json({ success: true, message: 'Document uploaded successfully', id: result.insertId });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
+  res.status(501).json({
+    success: false,
+    message: 'Document storage is not supported by the current database schema.'
+  });
 };
 
-// Delete Document
 exports.deleteDocument = async (req, res) => {
-  try {
-    const { documentId } = req.params;
-
-    await db.query('DELETE FROM patient_documents WHERE id = ?', [documentId]);
-
-    res.json({ success: true, message: 'Document deleted successfully' });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
+  res.status(501).json({
+    success: false,
+    message: 'Document storage is not supported by the current database schema.'
+  });
 };
 
-// Add Ledger Entry
+// Add Ledger Entry — no patient_ledger table; the closest real equivalent is a payment
+// record, so a debit/credit ledger entry is recorded there when it represents a payment.
 exports.addLedgerEntry = async (req, res) => {
   try {
     const { patientId } = req.params;
-    const { hospital_id, transaction_type, debit, credit, ...otherData } = req.body;
+    const { hospital_id, billing_id, credit, payment_method, notes } = req.body;
 
-    // Get current balance
-    const [lastEntry] = await db.query(
-      'SELECT balance FROM patient_ledger WHERE patient_id = ? AND hospital_id = ? ORDER BY transaction_date DESC LIMIT 1',
-      [patientId, hospital_id]
+    if (!credit) {
+      return res.status(400).json({
+        success: false,
+        message: 'Only payment (credit) ledger entries are supported by the current database schema.'
+      });
+    }
+
+    const [result] = await db.query(
+      `INSERT INTO payment (hospital_id, patient_id, billing_id, amount, payment_method, status, notes, payment_date)
+       VALUES (?, ?, ?, ?, ?, 'completed', ?, NOW()) RETURNING id`,
+      [hospital_id, patientId, billing_id || null, credit, payment_method || 'cash', notes || null]
     );
 
-    const currentBalance = lastEntry.length > 0 ? parseFloat(lastEntry[0].balance) : 0;
-    const newBalance = currentBalance + parseFloat(debit || 0) - parseFloat(credit || 0);
-
-    const ledgerData = {
-      patient_id: patientId,
-      hospital_id,
-      transaction_type,
-      debit: debit || 0,
-      credit: credit || 0,
-      balance: newBalance,
-      created_by: req.user.id,
-      ...otherData
-    };
-
-    const [result] = await db.query('INSERT INTO patient_ledger SET ?', [ledgerData]);
-
-    res.json({ success: true, message: 'Ledger entry added successfully', id: result.insertId, balance: newBalance });
+    res.json({ success: true, message: 'Ledger entry added successfully', id: result[0]?.id });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Add Follow-up
+// Add Follow-up — no patient_followups table in the real schema.
 exports.addFollowup = async (req, res) => {
-  try {
-    const { patientId } = req.params;
-    const followupData = { ...req.body, patient_id: patientId };
-
-    const [result] = await db.query('INSERT INTO patient_followups SET ?', [followupData]);
-
-    res.json({ success: true, message: 'Follow-up scheduled successfully', id: result.insertId });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
+  res.status(501).json({
+    success: false,
+    message: 'Follow-up scheduling is not supported by the current database schema.'
+  });
 };
 
 // Log Communication
 exports.logCommunication = async (req, res) => {
   try {
     const { patientId } = req.params;
-    const commData = { ...req.body, patient_id: patientId, sent_by: req.user.id };
+    const { hospital_id, communication_type, subject, message, status } = req.body;
 
-    const [result] = await db.query('INSERT INTO patient_communications SET ?', [commData]);
+    const [result] = await db.query(
+      `INSERT INTO patient_communication_log (hospital_id, patient_id, communication_type, subject, message, sent_by, sent_at, status)
+       VALUES (?, ?, ?, ?, ?, ?, NOW(), ?) RETURNING id`,
+      [hospital_id, patientId, communication_type, subject, message, req.user.id, status || 'sent']
+    );
 
-    res.json({ success: true, message: 'Communication logged successfully', id: result.insertId });
+    res.json({ success: true, message: 'Communication logged successfully', id: result[0]?.id });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Add Consent
+// Add Consent — no patient_consents table in the real schema.
 exports.addConsent = async (req, res) => {
-  try {
-    const { patientId } = req.params;
-    const consentData = { ...req.body, patient_id: patientId };
-
-    const [result] = await db.query('INSERT INTO patient_consents SET ?', [consentData]);
-
-    res.json({ success: true, message: 'Consent recorded successfully', id: result.insertId });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
+  res.status(501).json({
+    success: false,
+    message: 'Consent records are not supported by the current database schema.'
+  });
 };
 
 // Add Feedback
 exports.addFeedback = async (req, res) => {
   try {
     const { patientId } = req.params;
-    const feedbackData = { ...req.body, patient_id: patientId };
+    const { hospital_id, doctor_id, rating, comments, overall_experience_rating, cleanliness_rating, staff_behavior_rating, wait_time_rating, would_recommend } = req.body;
 
-    const [result] = await db.query('INSERT INTO patient_feedback SET ?', [feedbackData]);
+    const [result] = await db.query(
+      `INSERT INTO patient_feedback (patient_id, hospital_id, doctor_id, rating, comments, overall_experience_rating, cleanliness_rating, staff_behavior_rating, wait_time_rating, would_recommend, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW()) RETURNING id`,
+      [patientId, hospital_id, doctor_id, rating, comments, overall_experience_rating, cleanliness_rating, staff_behavior_rating, wait_time_rating, would_recommend]
+    );
 
-    res.json({ success: true, message: 'Feedback submitted successfully', id: result.insertId });
+    res.json({ success: true, message: 'Feedback submitted successfully', id: result[0]?.id });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -433,20 +451,29 @@ exports.updateClinicSettings = async (req, res) => {
   try {
     const { hospital_id, ...settingsData } = req.body;
 
+    const allowedColumns = ['clinic_name', 'logo_url', 'primary_color', 'secondary_color', 'header_text', 'footer_text'];
+    const { cols, values } = buildUpdateFields(settingsData, allowedColumns);
+
     const [existing] = await db.query(
       'SELECT id FROM clinic_settings WHERE hospital_id = ?',
       [hospital_id]
     );
 
+    if (cols.length === 0) {
+      return res.status(400).json({ success: false, message: 'No updatable fields provided' });
+    }
+
     if (existing.length > 0) {
+      const setClause = cols.map(c => `${c} = ?`).join(', ');
       await db.query(
-        'UPDATE clinic_settings SET ? WHERE hospital_id = ?',
-        [settingsData, hospital_id]
+        `UPDATE clinic_settings SET ${setClause} WHERE hospital_id = ?`,
+        [...values, hospital_id]
       );
     } else {
+      const placeholders = cols.map(() => '?').join(', ');
       await db.query(
-        'INSERT INTO clinic_settings SET ?',
-        [{ hospital_id, ...settingsData }]
+        `INSERT INTO clinic_settings (hospital_id, ${cols.join(', ')}) VALUES (?, ${placeholders})`,
+        [hospital_id, ...values]
       );
     }
 

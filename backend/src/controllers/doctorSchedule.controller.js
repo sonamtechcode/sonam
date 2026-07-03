@@ -1,16 +1,28 @@
 const db = require('../config/database');
 
+// doctor_schedules.day_of_week has a CHECK constraint requiring capitalized values
+// ('Monday'..'Sunday'), but the frontend (DoctorSchedule.jsx) sends lowercase
+// ('monday'..'sunday'). Normalize here so inserts/filters don't fail the constraint.
+const normalizeDay = (day) => {
+  if (!day || typeof day !== 'string') return day;
+  return day.charAt(0).toUpperCase() + day.slice(1).toLowerCase();
+};
+
 // Get doctor schedules
 exports.getDoctorSchedules = async (req, res) => {
   try {
-    const { hospitalId } = req.user;
+    const hospitalId = req.user.hospital_id;
     const { doctorId, dayOfWeek } = req.query;
 
+    // Doctors have no department_id FK in the real schema, so department_name is
+    // derived via the specialization-name heuristic (best-effort, not a real relation).
     let query = `
-      SELECT ds.*, d.name as doctor_name, d.specialization, dep.name as department_name
+      SELECT ds.*, (u.first_name || ' ' || u.last_name) as doctor_name, d.specialization,
+             dep.name as department_name
       FROM doctor_schedules ds
       JOIN doctors d ON ds.doctor_id = d.id
-      LEFT JOIN departments dep ON d.department_id = dep.id
+      JOIN users u ON d.user_id = u.id
+      LEFT JOIN departments dep ON dep.hospital_id = d.hospital_id AND dep.name = d.specialization
       WHERE ds.hospital_id = ?
     `;
     const params = [hospitalId];
@@ -22,7 +34,7 @@ exports.getDoctorSchedules = async (req, res) => {
 
     if (dayOfWeek) {
       query += ' AND ds.day_of_week = ?';
-      params.push(dayOfWeek);
+      params.push(normalizeDay(dayOfWeek));
     }
 
     query += ' ORDER BY ds.day_of_week, ds.start_time';
@@ -38,15 +50,15 @@ exports.getDoctorSchedules = async (req, res) => {
 // Add doctor schedule
 exports.addSchedule = async (req, res) => {
   try {
-    const { hospitalId } = req.user;
+    const hospitalId = req.user.hospital_id;
     const {
       doctor_id,
-      day_of_week,
       start_time,
       end_time,
-      max_appointments,
-      is_available
+      max_patients,
+      is_active
     } = req.body;
+    const day_of_week = normalizeDay(req.body.day_of_week);
 
     // Check for overlapping schedules
     const [existing] = await db.query(`
@@ -66,13 +78,13 @@ exports.addSchedule = async (req, res) => {
     const [result] = await db.query(`
       INSERT INTO doctor_schedules (
         doctor_id, hospital_id, day_of_week, start_time, end_time,
-        max_appointments, is_available
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
-    `, [doctor_id, hospitalId, day_of_week, start_time, end_time, max_appointments, is_available]);
+        max_patients_per_day, is_active
+      ) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id
+    `, [doctor_id, hospitalId, day_of_week, start_time, end_time, max_patients, is_active !== false]);
 
     res.status(201).json({
       message: 'Schedule added successfully',
-      id: result.insertId
+      id: result[0]?.id
     });
   } catch (error) {
     console.error('Add schedule error:', error);
@@ -84,15 +96,31 @@ exports.addSchedule = async (req, res) => {
 exports.updateSchedule = async (req, res) => {
   try {
     const { id } = req.params;
-    const { hospitalId } = req.user;
-    const updates = req.body;
+    const hospitalId = req.user.hospital_id;
 
-    const fields = Object.keys(updates).map(key => `${key} = ?`).join(', ');
-    const values = [...Object.values(updates), hospitalId, id];
+    // max_patients (frontend field name) maps to the max_patients_per_day column;
+    // everything else the frontend sends (day_of_week, start_time, end_time, is_active)
+    // already matches the real column names.
+    const updates = { ...req.body };
+    if (Object.prototype.hasOwnProperty.call(updates, 'max_patients')) {
+      updates.max_patients_per_day = updates.max_patients;
+      delete updates.max_patients;
+    }
+    if (updates.day_of_week) {
+      updates.day_of_week = normalizeDay(updates.day_of_week);
+    }
+
+    const columns = Object.keys(updates);
+    if (columns.length === 0) {
+      return res.status(400).json({ message: 'No fields to update' });
+    }
+
+    const fields = columns.map(key => `${key} = ?`).join(', ');
+    const values = [...columns.map(key => updates[key]), hospitalId, id];
 
     await db.query(`
-      UPDATE doctor_schedules 
-      SET ${fields}
+      UPDATE doctor_schedules
+      SET ${fields}, updated_at = NOW()
       WHERE hospital_id = ? AND id = ?
     `, values);
 
@@ -107,7 +135,7 @@ exports.updateSchedule = async (req, res) => {
 exports.deleteSchedule = async (req, res) => {
   try {
     const { id } = req.params;
-    const { hospitalId } = req.user;
+    const hospitalId = req.user.hospital_id;
 
     await db.query('DELETE FROM doctor_schedules WHERE id = ? AND hospital_id = ?', [id, hospitalId]);
 
@@ -122,7 +150,7 @@ exports.deleteSchedule = async (req, res) => {
 exports.getWeeklySchedule = async (req, res) => {
   try {
     const { doctorId } = req.params;
-    const { hospitalId } = req.user;
+    const hospitalId = req.user.hospital_id;
 
     const [schedules] = await db.query(`
       SELECT * FROM doctor_schedules

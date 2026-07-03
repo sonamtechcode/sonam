@@ -3,7 +3,7 @@ const db = require('../config/database');
 // Get analytics dashboard data
 exports.getDashboardAnalytics = async (req, res) => {
   try {
-    const { hospitalId } = req.user;
+    const hospitalId = req.user.hospital_id;
     const { startDate, endDate } = req.query;
 
     // Revenue analytics
@@ -29,32 +29,34 @@ exports.getDashboardAnalytics = async (req, res) => {
 
     // Patient statistics
     const [patientStats] = await db.query(`
-      SELECT 
+      SELECT
         COUNT(*) as total_patients,
-        COUNT(CASE WHEN DATE(created_at) = CURDATE() THEN 1 END) as today_patients,
-        COUNT(CASE WHEN MONTH(created_at) = MONTH(CURDATE()) THEN 1 END) as month_patients
+        COUNT(CASE WHEN DATE(created_at) = CURRENT_DATE THEN 1 END) as today_patients,
+        COUNT(CASE WHEN EXTRACT(MONTH FROM created_at) = EXTRACT(MONTH FROM CURRENT_DATE) THEN 1 END) as month_patients
       FROM patients
       WHERE hospital_id = ?
     `, [hospitalId]);
 
     // Appointment statistics
     const [appointmentStats] = await db.query(`
-      SELECT 
+      SELECT
         COUNT(*) as total_appointments,
-        COUNT(CASE WHEN DATE(appointment_date) = CURDATE() THEN 1 END) as today_appointments,
+        COUNT(CASE WHEN DATE(appointment_date) = CURRENT_DATE THEN 1 END) as today_appointments,
         COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed,
         COUNT(CASE WHEN status = 'cancelled' THEN 1 END) as cancelled
       FROM appointments
       WHERE hospital_id = ?
     `, [hospitalId]);
 
-    // Department-wise patient distribution
+    // Department-wise patient distribution. Doctors have no department_id FK in this
+    // schema, so we match on d.specialization = department name (best-effort, not a
+    // real relation), same heuristic used in dashboard.controller.js.
     const [departmentStats] = await db.query(`
-      SELECT 
+      SELECT
         d.name as department,
         COUNT(a.id) as patient_count
       FROM departments d
-      LEFT JOIN doctors doc ON d.id = doc.department_id
+      LEFT JOIN doctors doc ON doc.hospital_id = d.hospital_id AND doc.specialization = d.name
       LEFT JOIN appointments a ON doc.id = a.doctor_id
       WHERE d.hospital_id = ?
       GROUP BY d.id, d.name
@@ -63,15 +65,16 @@ exports.getDashboardAnalytics = async (req, res) => {
 
     // Top doctors by appointments
     const [topDoctors] = await db.query(`
-      SELECT 
-        doc.name,
+      SELECT
+        (u.first_name || ' ' || u.last_name) as name,
         doc.specialization,
         COUNT(a.id) as appointment_count,
         SUM(CASE WHEN a.status = 'completed' THEN 1 ELSE 0 END) as completed_count
       FROM doctors doc
+      JOIN users u ON doc.user_id = u.id
       LEFT JOIN appointments a ON doc.id = a.doctor_id
       WHERE doc.hospital_id = ?
-      GROUP BY doc.id
+      GROUP BY doc.id, u.first_name, u.last_name
       ORDER BY appointment_count DESC
       LIMIT 10
     `, [hospitalId]);
@@ -92,14 +95,16 @@ exports.getDashboardAnalytics = async (req, res) => {
 // Get revenue analytics
 exports.getRevenueAnalytics = async (req, res) => {
   try {
-    const { hospitalId } = req.user;
+    const hospitalId = req.user.hospital_id;
     const { period = 'month' } = req.query;
 
+    // billing has no paid_amount column in the real schema; "paid" revenue is derived
+    // from total_amount filtered by payment_status instead.
     let groupBy = 'DATE(created_at)';
     let limit = 30;
-    
+
     if (period === 'year') {
-      groupBy = 'MONTH(created_at)';
+      groupBy = 'EXTRACT(MONTH FROM created_at)';
       limit = 12;
     } else if (period === 'week') {
       groupBy = 'DATE(created_at)';
@@ -107,25 +112,25 @@ exports.getRevenueAnalytics = async (req, res) => {
     }
 
     const [revenue] = await db.query(`
-      SELECT 
+      SELECT
         ${groupBy} as period,
         SUM(total_amount) as total_revenue,
-        SUM(paid_amount) as paid_revenue,
-        SUM(total_amount - paid_amount) as pending_revenue,
+        SUM(CASE WHEN payment_status = 'paid' THEN total_amount ELSE 0 END) as paid_revenue,
+        SUM(CASE WHEN payment_status != 'paid' THEN total_amount ELSE 0 END) as pending_revenue,
         COUNT(*) as transaction_count
       FROM billing
       WHERE hospital_id = ?
       GROUP BY ${groupBy}
-      ORDER BY created_at DESC
+      ORDER BY period DESC
       LIMIT ?
     `, [hospitalId, limit]);
 
     // Payment method breakdown
     const [paymentMethods] = await db.query(`
-      SELECT 
+      SELECT
         payment_method,
         COUNT(*) as count,
-        SUM(paid_amount) as total
+        SUM(total_amount) as total
       FROM billing
       WHERE hospital_id = ? AND payment_status = 'paid'
       GROUP BY payment_method

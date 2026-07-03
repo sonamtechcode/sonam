@@ -72,7 +72,7 @@ exports.getAuditStats = async (req, res) => {
       SELECT action, COUNT(*) as count
       FROM audit_logs
       WHERE hospital_id = ?
-      AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+      AND created_at >= NOW() - INTERVAL '30 days'
       GROUP BY action
       ORDER BY count DESC
     `, [hospitalId]);
@@ -82,7 +82,7 @@ exports.getAuditStats = async (req, res) => {
       SELECT module, COUNT(*) as count
       FROM audit_logs
       WHERE hospital_id = ?
-      AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+      AND created_at >= NOW() - INTERVAL '30 days'
       GROUP BY module
       ORDER BY count DESC
     `, [hospitalId]);
@@ -93,7 +93,7 @@ exports.getAuditStats = async (req, res) => {
       FROM audit_logs al
       JOIN users u ON al.user_id = u.id
       WHERE al.hospital_id = ?
-      AND al.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+      AND al.created_at >= NOW() - INTERVAL '30 days'
       GROUP BY u.id
       ORDER BY activity_count DESC
       LIMIT 10
@@ -104,7 +104,7 @@ exports.getAuditStats = async (req, res) => {
       SELECT DATE(created_at) as date, COUNT(*) as count
       FROM audit_logs
       WHERE hospital_id = ?
-      AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+      AND created_at >= NOW() - INTERVAL '30 days'
       GROUP BY DATE(created_at)
       ORDER BY date DESC
     `, [hospitalId]);

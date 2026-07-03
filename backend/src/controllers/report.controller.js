@@ -36,10 +36,16 @@ const upload = multer({
 
 exports.uploadMiddleware = upload;
 
+// NOTE: the real table is `report` (not `patient_reports`), and it has no file_name /
+// file_path / description columns — it models a clinical report (findings/recommendations)
+// with a single `file_url` field, not a generic file-upload record. The uploaded file's
+// disk path is stored in file_url (closest available column) and its original name is
+// folded into `findings` so it isn't silently lost; there's nowhere else to put it in the
+// real schema.
 exports.getByPatient = async (req, res) => {
   try {
     const [reports] = await db.query(
-      `SELECT * FROM patient_reports WHERE patient_id = ? ORDER BY created_at DESC`,
+      `SELECT *, file_url as file_path FROM report WHERE patient_id = ? ORDER BY created_at DESC`,
       [req.params.patientId]
     );
     res.json({ success: true, data: reports });
@@ -54,20 +60,22 @@ exports.upload = async (req, res) => {
       return res.status(400).json({ success: false, message: 'No file uploaded' });
     }
 
+    const hospitalId = req.user.hospital_id;
     const { patient_id, report_type, description } = req.body;
     const file_path = req.file.path;
     const file_name = req.file.originalname;
+    const findings = description ? `${description} (file: ${file_name})` : `file: ${file_name}`;
 
     const [result] = await db.query(
-      `INSERT INTO patient_reports (patient_id, report_type, file_name, file_path, description) 
-       VALUES (?, ?, ?, ?, ?)`,
-      [patient_id, report_type, file_name, file_path, description]
+      `INSERT INTO report (hospital_id, patient_id, report_type, file_url, findings, report_date, status)
+       VALUES (?, ?, ?, ?, ?, CURRENT_DATE, 'draft') RETURNING id`,
+      [hospitalId, patient_id, report_type, file_path, findings]
     );
 
     res.status(201).json({
       success: true,
       message: 'Report uploaded successfully',
-      id: result.insertId
+      id: result[0]?.id
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -76,13 +84,13 @@ exports.upload = async (req, res) => {
 
 exports.delete = async (req, res) => {
   try {
-    const [reports] = await db.query('SELECT file_path FROM patient_reports WHERE id = ?', [req.params.id]);
-    
-    if (reports.length > 0 && fs.existsSync(reports[0].file_path)) {
-      fs.unlinkSync(reports[0].file_path);
+    const [reports] = await db.query('SELECT file_url FROM report WHERE id = ?', [req.params.id]);
+
+    if (reports.length > 0 && reports[0].file_url && fs.existsSync(reports[0].file_url)) {
+      fs.unlinkSync(reports[0].file_url);
     }
 
-    await db.query('DELETE FROM patient_reports WHERE id = ?', [req.params.id]);
+    await db.query('DELETE FROM report WHERE id = ?', [req.params.id]);
     res.json({ success: true, message: 'Report deleted successfully' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

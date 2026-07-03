@@ -4,10 +4,10 @@ const db = require('../config/database');
 exports.getPatientVitals = async (req, res) => {
   try {
     const { patientId } = req.params;
-    const { hospitalId } = req.user;
+    const hospitalId = req.user.hospital_id;
 
     const [vitals] = await db.query(`
-      SELECT v.*, u.name as recorded_by_name
+      SELECT v.*, (u.first_name || ' ' || u.last_name) as recorded_by_name
       FROM patient_vitals v
       LEFT JOIN users u ON v.recorded_by = u.id
       WHERE v.patient_id = ? AND v.hospital_id = ?
@@ -24,13 +24,15 @@ exports.getPatientVitals = async (req, res) => {
 // Add new vital record
 exports.addVitals = async (req, res) => {
   try {
-    const { hospitalId, userId } = req.user;
+    const hospitalId = req.user.hospital_id;
+    const userId = req.user.id;
     const {
       patient_id,
       temperature,
       blood_pressure_systolic,
       blood_pressure_diastolic,
       heart_rate,
+      pulse_rate, // frontend (PatientVitals.jsx) sends `pulse_rate`; maps to the `heart_rate` column
       respiratory_rate,
       oxygen_saturation,
       weight,
@@ -44,19 +46,19 @@ exports.addVitals = async (req, res) => {
       INSERT INTO patient_vitals (
         patient_id, hospital_id, temperature, blood_pressure_systolic,
         blood_pressure_diastolic, heart_rate, respiratory_rate,
-        oxygen_saturation, weight, height, bmi, blood_sugar,
+        oxygen_saturation, weight, height, bmi, blood_glucose,
         notes, recorded_by, recorded_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW()) RETURNING id
     `, [
       patient_id, hospitalId, temperature, blood_pressure_systolic,
-      blood_pressure_diastolic, heart_rate, respiratory_rate,
+      blood_pressure_diastolic, heart_rate ?? pulse_rate ?? null, respiratory_rate,
       oxygen_saturation, weight, height, bmi, blood_sugar,
       notes, userId
     ]);
 
     res.status(201).json({
       message: 'Vitals recorded successfully',
-      id: result.insertId
+      id: result[0]?.id
     });
   } catch (error) {
     console.error('Add vitals error:', error);
@@ -68,10 +70,10 @@ exports.addVitals = async (req, res) => {
 exports.getLatestVitals = async (req, res) => {
   try {
     const { patientId } = req.params;
-    const { hospitalId } = req.user;
+    const hospitalId = req.user.hospital_id;
 
     const [vitals] = await db.query(`
-      SELECT v.*, u.name as recorded_by_name
+      SELECT v.*, (u.first_name || ' ' || u.last_name) as recorded_by_name
       FROM patient_vitals v
       LEFT JOIN users u ON v.recorded_by = u.id
       WHERE v.patient_id = ? AND v.hospital_id = ?
@@ -90,7 +92,7 @@ exports.getLatestVitals = async (req, res) => {
 exports.updateVitals = async (req, res) => {
   try {
     const { id } = req.params;
-    const { hospitalId } = req.user;
+    const hospitalId = req.user.hospital_id;
     const updates = req.body;
 
     const fields = Object.keys(updates).map(key => `${key} = ?`).join(', ');
@@ -113,7 +115,7 @@ exports.updateVitals = async (req, res) => {
 exports.deleteVitals = async (req, res) => {
   try {
     const { id } = req.params;
-    const { hospitalId } = req.user;
+    const hospitalId = req.user.hospital_id;
 
     await db.query('DELETE FROM patient_vitals WHERE id = ? AND hospital_id = ?', [id, hospitalId]);
 
